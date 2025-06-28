@@ -1,103 +1,287 @@
-import Image from "next/image";
+'use client'
+
+import { useRef, useState, useCallback, FormEvent, ChangeEvent } from 'react'
+import dynamic from 'next/dynamic'
+import {
+  Upload,
+  MapPin,
+  List,
+  Smartphone,
+  MapPinnedIcon,
+} from 'lucide-react'
+import { Platform, SimType } from '@/types/gpx'
+const MapComponent = dynamic(() => import('@/components/MapComponent'), {
+  ssr: false,
+})
+
+const defaultPosition = { lat: 25.721314872473577, lon: -100.37379898123986 }
+
+const platformTabs = [
+  { key: 'android', label: 'Android', icon: Smartphone },
+  { key: 'ios', label: 'iOS', icon: Smartphone },
+] as const
+
+const simTabs = [
+  { key: 'gpx', label: 'Archivo GPX', icon: Upload },
+  { key: 'manual', label: 'Coordenada manual', icon: MapPin },
+  { key: 'batch', label: 'Lote de coordenadas', icon: List },
+  { key: 'map', label: 'Mapa', icon: MapPinnedIcon },
+] as const
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [status, setStatus] = useState<string>('')
+  const [manual, setManual] = useState<string>('')
+  const [batch, setBatch] = useState<string>('')
+  const [mapMode, setMapMode] = useState<'location' | 'route'>('location')
+  const [mapCoord, setMapCoord] = useState<{ lat: number, lon: number, label?: string } | null>(defaultPosition)
+  const [routeCoords, setRouteCoords] = useState<{
+    from: { lat: number; lon: number; label?: string };
+    to: { lat: number; lon: number; label?: string };
+    route: { lat: number, lng: number }[]
+  } | null>(null)
+  const [hasError, setHasError] = useState<boolean>(false)
+  const [fileName, setFileName] = useState<string>('')
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const [platform, setPlatform] = useState<Platform>('android')
+  const [simType, setSimType] = useState<SimType>('gpx')
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileClick = useCallback(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+      fileInputRef.current.click()
+      setFileName('')
+    }
+  }, [])
+
+  const handleFileChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      setFileName(file?.name ?? '')
+      setHasError(!file)
+    },
+    []
+  )
+
+  const handleSelectMap = useCallback((lat: number, lon: number, label?: string) => {
+    setMapCoord({ lat, lon, label });
+  }, []);
+
+  const handleSubmit = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault()
+      const form = new FormData(e.currentTarget)
+      form.set('platform', platform)
+
+      if (simType === 'gpx' && !fileInputRef.current?.files?.length) {
+        setHasError(true)
+        return
+      }
+
+      if (simType === 'manual') form.set('manual', manual)
+      if (simType === 'batch') form.set('batch', batch)
+
+      if (simType === 'map' && mapMode === "location" && mapCoord) {
+        form.set('manual', `${mapCoord.lat},${mapCoord.lon}`)
+      } else if (simType === 'map' && mapMode === "route" && routeCoords) {
+        const routeBatchText = routeCoords.route
+          .map(coord => `${coord.lat},${coord.lng}`)
+          .join('\n');
+        form.set('batch', routeBatchText)
+      }
+
+      setHasError(false)
+      setStatus('⏳ Enviando coordenadas...')
+
+      try {
+        const res = await fetch('/api/simulate', {
+          method: 'POST',
+          body: form,
+        })
+
+        const data = await res.json()
+        setStatus(
+          res.ok
+            ? `✅ Simulación iniciada con ${data.total} coordenadas`
+            : `❌ Error: ${data.error}`
+        )
+      } catch {
+        setStatus('❌ Error en la conexión con el servidor')
+      }
+    },
+    [platform, simType, manual, batch, mapCoord, mapMode, routeCoords]
+  )
+
+  const renderInputSection = () => {
+    switch (simType) {
+      case 'gpx':
+        return (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Selecciona un archivo GPX:
+            </label>
+            <div
+              className={`flex items-center gap-3 px-4 py-2 rounded-lg bg-white border ${hasError
+                ? 'border-red-500 ring-1 ring-red-300'
+                : 'border-gray-300 focus-within:ring-1 focus-within:ring-blue-300'
+                }`}
+            >
+              <button
+                type="button"
+                onClick={handleFileClick}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium shadow"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Elegir archivo
+              </button>
+              <span className="text-sm text-gray-600 truncate max-w-[200px]">
+                {fileName || 'Ningún archivo seleccionado'}
+              </span>
+            </div>
+            {hasError && (
+              <p className="mt-4 text-sm text-red-600">
+                Debes seleccionar un archivo GPX.
+              </p>
+            )}
+            <input
+              ref={fileInputRef}
+              id="gpx-upload"
+              type="file"
+              name="gpx"
+              accept=".gpx"
+              onChange={handleFileChange}
+              className="hidden"
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          </div>
+        )
+
+      case 'manual':
+        return (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Coordenada (lat, lon):
+            </label>
+            <input
+              type="text"
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              required
+              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="Ej: 19.4326,-99.1332"
+            />
+          </div>
+        )
+
+      case 'batch':
+        return (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Lote de coordenadas:
+            </label>
+            <textarea
+              value={batch}
+              onChange={(e) => setBatch(e.target.value)}
+              required
+              rows={5}
+              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder={`Una coordenada por línea:\n19.4326,-99.1332\n25.72533,-100.37566`}
+            />
+          </div>
+        )
+
+      case 'map':
+        return (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Selecciona una ubicación en el mapa:
+            </label>
+            <MapComponent
+              onSelect={handleSelectMap}
+              mode={mapMode}
+              setMode={setMapMode}
+              setRouteCoords={setRouteCoords}
+              initial={defaultPosition}
+            />
+            {(mapCoord && mapMode === "location") && (
+              <p className="mt-2 text-sm text-gray-600">
+                Coordenadas: {mapCoord.lat.toFixed(5)}, {mapCoord.lon.toFixed(5)}
+              </p>
+            )}
+          </div>
+        )
+
+
+      default:
+        return null
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-gray-100 via-white to-gray-200 py-16 px-4">
+      <div className="max-w-2xl mx-auto bg-white rounded-3xl p-10 border border-gray-200 shadow-2xl shadow-black/10">
+        <h1 className="text-4xl font-extrabold text-center text-blue-600 mb-8 tracking-tight">
+          Simulador de Ubicación
+        </h1>
+
+        {/* Plataforma */}
+        <div className="flex justify-center mb-6 gap-3">
+          {platformTabs.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setPlatform(key)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium border transition-all ${platform === key
+                ? 'bg-blue-100 text-blue-700 border-blue-300 shadow'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}
+            >
+              <Icon size={18} />
+              {label}
+            </button>
+          ))}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+
+        {/* Tipo de simulación */}
+        <div className="grid grid-cols-2 justify-center mb-8 gap-3">
+          {simTabs.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setSimType(key)}
+              className={`flex items-center justify-center gap-2.5 px-4 py-3 rounded-lg font-medium border transition-all ${simType === key
+                ? 'bg-green-100 text-green-700 border-green-300 shadow'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}
+            >
+              <span style={{ width: 22 }}>
+                <Icon size={22} />
+              </span>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Formulario */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {renderInputSection()}
+          <button
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition-colors"
+          >
+            🚀 Simular Ubicación
+          </button>
+        </form>
+
+        {/* Estado */}
+        {status && (
+          <p className="mt-6 text-center text-sm font-medium text-gray-700">
+            {status}
+          </p>
+        )}
+      </div>
+
+      <footer className="text-center text-xs text-gray-400 mt-10">
+        Hecho con 💙 para pruebas de ubicación
       </footer>
-    </div>
-  );
+    </main>
+  )
 }

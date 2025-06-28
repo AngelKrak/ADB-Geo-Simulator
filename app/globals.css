@@ -24,3 +24,31 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+button {
+  cursor: pointer;
+}
+
+input {
+  color: var(--background);
+}
+
+.leaflet-control-geocoder-form input {
+  color: #222;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.leaflet-control-geocoder-icon {
+  background-image: url('https://cdn-icons-png.flaticon.com/512/622/622669.png');
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  width: 24px;
+  height: 24px;
+}
+
+.leaflet-routing-container,
+.leaflet-routing-alternatives-container {
+  display: none;
+}
